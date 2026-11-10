@@ -261,9 +261,10 @@ module StateMap =
 
 (* Extract a string from a global pointer *)
 
-let extract_string m blk ofs =
+let extract_string ?(maxlen = max_int) m blk ofs =
   let b = Buffer.create 80 in
   let rec extract blk ofs =
+    if Buffer.length b >= maxlen then Some(Buffer.contents b) else
     match Mem.load Mint8unsigned m blk ofs with
     | Some(Vint n) ->
         let c = Char.chr (Z.to_int n) in
@@ -287,6 +288,27 @@ let re_conversion = Str.regexp (
 ^ "\\([aAcdeEfgGinopsuxX%]\\)"            (* group 4: conversion specifier *)
 )
 
+(* Decomposition of the "flags, width, precision" part of a conversion *)
+
+let re_flags_width_precision = Str.regexp
+  "%\\([-+0# ]*\\)\\([0-9]*\\)\\(\\.\\([0-9]*\\)\\)?"
+
+let format_string m flags blk ofs =
+  ignore (Str.string_match re_flags_width_precision flags 0);
+  let left = String.contains (Str.matched_group 1 flags) '-'
+  and width =
+    match Str.matched_group 2 flags with "" -> 0 | w -> int_of_string w
+  and maxlen =
+    match Str.matched_group 4 flags with
+    | "" -> 0
+    | p -> int_of_string p
+    | exception Not_found -> max_int in
+  match extract_string ~maxlen m blk ofs with
+  | None -> "<bad string>"
+  | Some s ->
+      let pad = String.make (max 0 (width - String.length s)) ' ' in
+      if left then s ^ pad else pad ^ s
+
 external format_float: string -> float -> string
   = "caml_format_float"
 external format_int32: string -> int32 -> string
@@ -309,10 +331,7 @@ let format_value m flags length conv arg =
   | ('f'|'e'|'E'|'g'|'G'|'a'), "", _ ->
       "<float argument expected"
   | 's', "", Vptr(blk, ofs) ->
-      begin match extract_string m blk ofs with
-      | Some s -> s
-      | None -> "<bad string>"
-      end
+      format_string m flags blk ofs
   | 's', "", _ ->
       "<pointer argument expected>"
   | 'p', "", Vptr(blk, ofs) ->
