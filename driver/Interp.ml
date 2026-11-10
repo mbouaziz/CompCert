@@ -294,16 +294,36 @@ external format_int32: string -> int32 -> string
 external format_int64: string -> int64 -> string
   = "caml_int64_format"
 
+(* Size in bytes of the integer argument of a %d, %i, %u, %o, %x or %X
+   conversion with the given length modifier.  [l], [z] and [t] denote
+   [long], [size_t] and [ptrdiff_t], whose sizes depend on the target. *)
+
+let sizeof_int_conversion length =
+  let c = !Machine.config in
+  match length with
+  | "l" -> c.Machine.sizeof_long
+  | "z" -> c.Machine.sizeof_size_t
+  | "t" -> c.Machine.sizeof_ptrdiff_t
+  | "ll" | "j" -> 8
+  | _ -> 4
+
 let format_value m flags length conv arg =
   match conv.[0], length, arg with
-  | ('d'|'i'|'u'|'o'|'x'|'X'|'c'), (""|"h"|"hh"|"l"|"z"|"t"), Vint i ->
+  | 'c', (""|"h"|"hh"|"l"|"z"|"t"), Vint i ->
       format_int32 (flags ^ conv) (camlint_of_coqint i)
-  | ('d'|'i'|'u'|'o'|'x'|'X'|'c'), (""|"h"|"hh"|"l"|"z"|"t"), _ ->
+  | 'c', (""|"h"|"hh"|"l"|"z"|"t"), _ ->
       "<int argument expected>"
-  | ('d'|'i'|'u'|'o'|'x'|'X'), ("ll"|"j"), Vlong i ->
-      format_int64 (flags ^ conv) (camlint64_of_coqint i)
-  | ('d'|'i'|'u'|'o'|'x'|'X'), ("ll"|"j"), _ ->
-      "<long long argument expected"
+  | ('d'|'i'|'u'|'o'|'x'|'X'), (""|"h"|"hh"|"l"|"z"|"t"|"ll"|"j"), _
+    when sizeof_int_conversion length = 4 ->
+      begin match arg with
+      | Vint i -> format_int32 (flags ^ conv) (camlint_of_coqint i)
+      | _ -> "<int argument expected>"
+      end
+  | ('d'|'i'|'u'|'o'|'x'|'X'), (""|"h"|"hh"|"l"|"z"|"t"|"ll"|"j"), _ ->
+      begin match arg with
+      | Vlong i -> format_int64 (flags ^ conv) (camlint64_of_coqint i)
+      | _ -> "<long long argument expected>"
+      end
   | ('f'|'e'|'E'|'g'|'G'|'a'), (""|"l"), Vfloat f ->
       format_float (flags ^ conv) (camlfloat_of_coqfloat f)
   | ('f'|'e'|'E'|'g'|'G'|'a'), "", _ ->
